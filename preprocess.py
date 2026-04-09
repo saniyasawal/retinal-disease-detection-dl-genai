@@ -41,46 +41,44 @@ print("Train:", len(train_df), "Test:", len(test_df))
 # =========================
 # BACKGROUND REMOVAL FUNC
 # =========================
-def crop_retina(img):
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+def crop_retina(img_input):
+    gray = cv2.cvtColor(img_input, cv2.COLOR_BGR2GRAY)
 
-    # Blur to reduce noise
-    gray = cv2.GaussianBlur(gray, (5, 5), 0)
+    _, thresh_mask = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    thresh_mask = cv2.medianBlur(thresh_mask, 5)
 
-    # Threshold to separate retina
-    _, thresh = cv2.threshold(gray, 10, 255, cv2.THRESH_BINARY)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5,5))
+    thresh_mask = cv2.morphologyEx(thresh_mask, cv2.MORPH_CLOSE, kernel)
 
-    # Find contours
-    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours, _ = cv2.findContours(thresh_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-    if len(contours) == 0:
-        return img
+    if contours:
+        cnt = max(contours, key=cv2.contourArea)
+        (x, y), radius = cv2.minEnclosingCircle(cnt)
 
-    # Largest contour = retina
-    c = max(contours, key=cv2.contourArea)
+        center = (int(x), int(y))
+        radius = int(radius)
 
-    # Fit enclosing circle
-    (x, y), radius = cv2.minEnclosingCircle(c)
+        mask = np.zeros_like(gray, dtype=np.uint8)
+        cv2.circle(mask, center, radius, 255, -1)
 
-    center = (int(x), int(y))
-    radius = int(radius)
+        masked_img = cv2.bitwise_and(img_input, img_input, mask=mask)
 
-    # Create mask
-    mask = np.zeros(img.shape[:2], dtype=np.uint8)
-    cv2.circle(mask, center, radius, 255, -1)
+        x1 = max(center[0]-radius, 0)
+        y1 = max(center[1]-radius, 0)
+        x2 = min(center[0]+radius, img_input.shape[1])
+        y2 = min(center[1]+radius, img_input.shape[0])
 
-    # Apply mask
-    result = cv2.bitwise_and(img, img, mask=mask)
+        cropped_bgr = masked_img[y1:y2, x1:x2]
+        cropped_alpha = mask[y1:y2, x1:x2]
 
-    # Crop tight bounding box
-    x1 = max(center[0] - radius, 0)
-    y1 = max(center[1] - radius, 0)
-    x2 = min(center[0] + radius, img.shape[1])
-    y2 = min(center[1] + radius, img.shape[0])
+        bgra = cv2.merge([cropped_bgr[:,:,0], cropped_bgr[:,:,1], cropped_bgr[:,:,2], cropped_alpha])
 
-    cropped = result[y1:y2, x1:x2]
-
-    return cropped
+        return bgra
+    else:
+        b,g,r = cv2.split(img_input)
+        alpha = np.full(img_input.shape[:2], 255, dtype=np.uint8)
+        return cv2.merge([b,g,r,alpha])
 
 # =========================
 # PROCESS FUNCTION
@@ -107,7 +105,17 @@ def process(df, split):
 
         # Background removed version
         img_bg_removed = crop_retina(img)
-        img_bg_removed = cv2.resize(img_bg_removed, (IMG_SIZE, IMG_SIZE))
+
+        # Separate BGR + Alpha
+        bgr = img_bg_removed[:, :, :3]
+        alpha = img_bg_removed[:, :, 3]
+
+        # Resize separately
+        bgr = cv2.resize(bgr, (IMG_SIZE, IMG_SIZE))
+        alpha = cv2.resize(alpha, (IMG_SIZE, IMG_SIZE), interpolation=cv2.INTER_NEAREST)
+
+        # Merge back
+        img_bg_removed = cv2.merge([bgr[:,:,0], bgr[:,:,1], bgr[:,:,2], alpha])
 
         # =========================
         # SAVE PATHS
@@ -120,9 +128,9 @@ def process(df, split):
 
         # Save images
         cv2.imwrite(os.path.join(bg_dir, img_name), img_resized)
-        cv2.imwrite(os.path.join(nobg_dir, img_name), img_bg_removed)
-
-    print(f"✅ Done processing {split}")
+        base_name = os.path.splitext(img_name)[0]
+        cv2.imwrite(os.path.join(nobg_dir, base_name + ".png"), img_bg_removed)
+        print(f"✅ Done processing {split}")
 
 # =========================
 # RUN
