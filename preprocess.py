@@ -115,8 +115,12 @@ def process(df, split):
         alpha = cv2.resize(alpha, (IMG_SIZE, IMG_SIZE), interpolation=cv2.INTER_NEAREST)
 
         # Merge back
+        # Merge BGRA
         img_bg_removed = cv2.merge([bgr[:,:,0], bgr[:,:,1], bgr[:,:,2], alpha])
 
+        # 🔥 CONVERT BGRA → RGB (DROP ALPHA PROPERLY)
+        img_bg_removed = cv2.cvtColor(img_bg_removed, cv2.COLOR_BGRA2BGR)
+        img_bg_removed = cv2.cvtColor(img_bg_removed, cv2.COLOR_BGR2RGB)
         # =========================
         # SAVE PATHS
         # =========================
